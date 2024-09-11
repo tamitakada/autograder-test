@@ -17,7 +17,7 @@ jobs:
 
     - name: Run tests using Docker image
       run: |
-        docker run --rm -v code:./submission -v ./results:./results a4grade ./run_autograder > ./results/container.log 2>&1
+        docker run --rm -v code:./submission -v ./results:./results a4grade ./run_autograder
         
     - name: Upload logs
       uses: actions/upload-artifact@v3
