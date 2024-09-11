@@ -1,0 +1,10 @@
+{
+  "tests": [
+    {
+      "score": 0,
+      "visibility": "visible",
+      "output": "Test failed: all",
+      "name": "Missing huffman.c"
+    }
+  ]
+}

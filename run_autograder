@@ -1,0 +1,219 @@
+#!/usr/bin/env python3
+
+import subprocess
+import os
+import json
+import shutil
+
+# from `your_grading_script` import `your_grading_fn`
+
+submission_dir = '/autograder/submission'
+# put students' results into this
+results_dir = '/autograder/results'
+# the dir to put infra code + Makefile
+source_dir = '/autograder/source'
+makefile_dir = '/autograder/source/Makefile'
+tests_dir = "/autograder/source/tests"
+
+
+def compile_code():
+    try:
+        result = subprocess.run(
+            ['make', '-C', source_dir], capture_output=True, text=True)
+        if result.returncode != 0:
+            raise Exception(f"Compilation failed:\n{result.stderr}")
+        print("Compilation successful.")
+    except Exception as e:
+        print("Compiling code failed")
+        write_results(0, True, "Error", error_message=str(e))
+        exit(1)
+
+
+def generate_uncompressed():
+    for f in os.listdir(tests_dir):
+        file_path = os.path.join(tests_dir, f)
+        compress_command = ['qemu-riscv64', '-B', '0x14000', '-L', '/opt/riscv/sysroot',
+                            '/autograder/source/compress', file_path]
+        c_result = subprocess.run(
+            compress_command, capture_output=True, text=True)
+        if c_result.returncode != 0:
+            print(f"Compression failed for file: {f}")
+            continue
+        # print(f"Compression successful for file: {f}")
+
+        decompress_command = ['qemu-riscv64', '-B', '0x14000', '-L', '/opt/riscv/sysroot',
+                              '/autograder/source/decompress', 'compressed.bits',
+                              'coding_table.bits', f'/autograder/source/tests/uncompressed_{f}']
+        d_result = subprocess.run(
+            decompress_command, capture_output=True, text=True)
+        if d_result.returncode != 0:
+            print(f"Decompression failed for file: {f}")
+            continue
+        # print(f"Decompression successful for file: {f}")
+        # Remove the temporary files
+        try:
+            os.remove('compressed.bits')
+            os.remove('coding_table.bits')
+        except OSError as e:
+            print(f"Error removing temporary files: {e}")
+    print("All files compressed and decompressed successfully.")
+
+
+def run_tests():
+    try:
+        with open("/autograder/source/pq_out.txt", "w") as pq_f:
+            pq_result = subprocess.run(['qemu-riscv64', '-B', '0x14000', '-L', '/opt/riscv/sysroot',
+                                        '/autograder/source/test_priority_queue'], stdout=pq_f, stderr=subprocess.PIPE)
+            if pq_result.returncode != 0:
+                print(f"Error: {pq_result.stderr.decode('utf-8')}")
+            else:
+                print(
+                    "test_priority_queue executed successfully and output written to pq_out.txt")
+
+        with open("/autograder/source/ht_out.txt", "w") as ht_f:
+            huff_result = subprocess.run(['qemu-riscv64', '-B', '0x14000', '-L', '/opt/riscv/sysroot',
+                                          '/autograder/source/test_huffman'], stdout=ht_f, stderr=subprocess.PIPE)
+            if huff_result.returncode != 0:
+                print(f"Error: {huff_result.stderr.decode('utf-8')}")
+            else:
+                print(
+                    "test_huffman executed successfully and output written to ht_out.txt")
+    except Exception as e:
+        write_results(0, vis=True,
+                      name="Test Priority Queue Failed", error_message=str(e))
+        exit(1)
+
+    try:
+        generate_uncompressed()
+    except Exception as e:
+        write_results(0, vis=True,
+                      name="Test Compression Failed", error_message=str(e))
+        exit(1)
+
+
+def compute_scores():
+    pq_score = 0
+    ht_score = 0
+    uncompress_score = 0
+    try:
+        with open("/autograder/source/pq_out.txt", "r") as pq_f:
+            pq_output = pq_f.read().splitlines()[:-1]
+            for line in pq_output:
+                if 'Test passed' in line:
+                    pq_score += 1
+    except Exception as e:
+        write_results(0, vis=True,
+                      name="Test Priority Queue Failed", error_message=str(e))
+        return 0, str(e)
+    try:
+        with open("/autograder/source/ht_out.txt", "r") as ht_f:
+            ht_output = ht_f.read().splitlines()[:-1]
+            for line in ht_output:
+                if 'Test passed' in line:
+                    ht_score += 1
+    except Exception as e:
+        write_results(0, vis=True,
+                      name="Test Huffman Tree Failed", error_message=str(e))
+        return 0, str(e)
+    decompression_tests = ['report.txt', 'smaug.txt', 'recipe.txt', 'cornell.txt',
+                           'poem.txt', 'hello_world.c', 'ex.txt', 'dialogue.txt',
+                           'bee-movie.txt', 'gophers.txt']
+    for f in decompression_tests:
+        original_file = f'/autograder/source/tests/{f}'
+        decompressed_file = f'/autograder/source/tests/uncompressed_{f}'
+        try:
+            with open(original_file, 'r') as o_f, open(decompressed_file, 'r') as d_f:
+                original = o_f.read()
+                decompressed = d_f.read()
+                if original == decompressed:
+                    uncompress_score += 1
+        except Exception as e:
+            write_results(0, vis=True,
+                          name="Test Decompression Failed", error_message=str(e))
+            return 0, str(e)
+    return 30 * (pq_score / 10) + 30 * (ht_score / 10) + 40 * (uncompress_score / 10), None
+
+
+def sanity_check():
+    compress_command = ['qemu-riscv64', '-B', '0x14000', '-L', '/opt/riscv/sysroot',
+                        '/autograder/source/compress', '/autograder/source/tests/ex.txt']
+    compress_result = subprocess.run(
+        compress_command, capture_output=True, text=True)
+    if compress_result.returncode != 0:
+        print(f"Compression failed for file: ex.txt")
+        return False
+
+    decompress_command = ['qemu-riscv64', '-B', '0x14000', '-L', '/opt/riscv/sysroot',
+                          '/autograder/source/decompress', 'compressed.bits',
+                          'coding_table.bits', '/autograder/source/tests/uncompressed_ex.txt']
+    decompress_result = subprocess.run(
+        decompress_command, capture_output=True, text=True)
+    if decompress_result.returncode != 0:
+        print(f"Decompression cmd failed for file: ex.txt")
+        return False
+
+    with open('/autograder/source/tests/ex.txt', 'r') as o_f, open('/autograder/source/tests/uncompressed_ex.txt', 'r') as d_f:
+        original = o_f.read()
+        decompressed = d_f.read()
+        if original != decompressed:
+            print("Decompression comparison failed for file: ex.txt")
+            return False
+    print("Sanity check passed.")
+    return True
+
+
+# def collect_output(sanity, correct_res):
+#     try:
+#         score, name = your_script(correct_res)
+#         write_results(score, sanity, name)
+#     except Exception as e:
+#         write_results(score=False, vis=sanity, name="", error_message=str(e))
+#         exit(1)
+
+
+def write_results(score, vis, name, error_message=None):
+    json_file = '/autograder/results/results.json'
+
+    if os.path.exists(json_file):
+        with open(json_file, 'r') as f:
+            try:
+                data = json.load(f)
+                if not isinstance(data, dict):
+                    data = {"tests": [data]}
+            except json.JSONDecodeError:
+                data = {"tests": []}
+    else:
+        data = {"tests": []}
+
+    # TODO: Gradescope assign weights for the score
+    new_result = {
+        "score": score,
+        "visibility": "visible" if vis else "after_published",
+        "output": "Tests completed." if score > 0 else f"Test failed: {error_message}",
+        "name": name
+    }
+
+    data["tests"].append(new_result)
+
+    with open(json_file, 'w') as f:
+        json.dump(data, f, indent=2)
+
+
+if __name__ == "__main__":
+    if not os.path.exists('/autograder/submission/huffman.c'):
+        write_results(0, True, "Missing huffman.c", "all")
+        exit(1)
+    if not os.path.exists('/autograder/submission/priority_queue.c'):
+        write_results(0, True, "Missing priority_queue.c", "all")
+        exit(1)
+    shutil.copytree(submission_dir, source_dir, dirs_exist_ok=True)
+    print("Copied files.")
+    compile_code()
+    sanity_check = sanity_check()
+    print("Ran sanity check.")
+    print("Running tests.")
+    run_tests()
+    score = compute_scores()
+    print(f"Score: {score[0]}")
+    write_results(0, True, "Sanity Check" + (" Passed" if sanity_check else " Failed. Failure in simple compression/decompression task."))
+    write_results(score[0], False, "Autograder Results")
