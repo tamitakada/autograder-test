@@ -1,0 +1,20 @@
+name: Autograder run
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+
+    - name: Build Docker image
+      run: |
+        docker build -t a4grade .
+
+    - name: Run tests using Docker image
+      run: |
+        docker run --rm -v code:/autograder/submission -v ./results:/autograder/results a4grade /autograder/run_autograder
