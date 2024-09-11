@@ -13,7 +13,7 @@ jobs:
 
     - name: Build Docker image
       run: |
-        docker build -t a4grade .
+        docker build -t a4grade autograder
 
     - name: Run tests using Docker image
       run: |
